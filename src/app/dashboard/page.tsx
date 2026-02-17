@@ -10,7 +10,14 @@ export default async function DashboardPage() {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
-  const user = await currentUser();
+  let user: Awaited<ReturnType<typeof currentUser>> = null;
+  try {
+    user = await currentUser();
+  } catch {
+    // Clerk API can fail (e.g. invalid/missing keys, network). Still render dashboard.
+    user = null;
+  }
+
   const admin = createServerSupabaseAdmin();
 
   let dbUser: { id: string } | null = null;
