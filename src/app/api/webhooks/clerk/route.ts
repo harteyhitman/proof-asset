@@ -59,16 +59,36 @@ export async function POST(req: Request) {
       case "user.created":
       case "user.updated": {
         const email = data.email_addresses?.[0]?.email_address;
-        if (!email) break;
-        await supabase.from("users").upsert(
-          {
-            clerk_id: data.id,
-            email,
-            name: [data.first_name, data.last_name].filter(Boolean).join(" ").trim() || null,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "clerk_id" }
-        );
+        const { data: newUser, error } = await supabase
+          .from("users")
+          .upsert(
+            {
+              clerk_id: data.id,
+              email,
+              name:
+                [data.first_name, data.last_name]
+                  .filter(Boolean)
+                  .join(" ")
+                  .trim() || null,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "clerk_id" }
+          )
+          .select("id")
+          .single();
+
+        if (error) {
+          console.error("Error creating user:", error);
+          break;
+        }
+
+        if (msg.type === "user.created" && newUser) {
+          await supabase.from("subscriptions").insert({
+            user_id: newUser.id,
+            status: "free", // Or any other status for a free plan
+          });
+        }
+
         break;
       }
       case "user.deleted": {

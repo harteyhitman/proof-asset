@@ -53,7 +53,7 @@ export async function POST(req: Request) {
         successUrl ?? `${baseUrl}/dashboard?success=true`,
       cancel_url: cancelUrl ?? `${baseUrl}/pricing?canceled=true`,
       customer_email: user.email ?? undefined,
-      metadata: { userId: user.id },
+      client_reference_id: user.id,
     });
 
     return NextResponse.json({

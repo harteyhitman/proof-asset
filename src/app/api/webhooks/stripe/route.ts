@@ -47,6 +47,7 @@ export async function POST(req: Request) {
   }
 
   try {
+    console.log(`Received Stripe event: ${event.type} (ID: ${event.id})`);
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
@@ -64,10 +65,12 @@ export async function POST(req: Request) {
         await handlePaymentSucceeded(invoice, supabase);
         break;
       }
+      default:
+        console.warn(`Unhandled Stripe event type: ${event.type} (ID: ${event.id})`);
     }
     return NextResponse.json({ received: true });
   } catch (error) {
-    console.error("Webhook error:", error);
+    console.error(`Error handling Stripe event ${event.type} (ID: ${event.id}):`, error);
     return NextResponse.json(
       { error: "Webhook handler failed" },
       { status: 500 }
@@ -79,13 +82,16 @@ async function handleCheckoutCompleted(
   session: Stripe.Checkout.Session,
   supabase: NonNullable<ReturnType<typeof createServerSupabaseAdmin>>
 ) {
-  const userId = session.metadata?.userId as string | undefined;
+  const userId = session.client_reference_id as string | undefined;
   const subscriptionId =
     typeof session.subscription === "string"
       ? session.subscription
       : session.subscription?.id;
 
-  if (!userId) return;
+  if (!userId) {
+    console.error("User ID not found in checkout session");
+    return;
+  }
 
   const stripe = getStripe();
   const subscription = subscriptionId
@@ -118,6 +124,9 @@ async function handleCheckoutCompleted(
     { onConflict: "stripe_subscription_id" }
   );
 
+  const role = priceId ? "pro" : "free";
+  await supabase.from("users").update({ role }).eq("id", userId);
+
   if (session.customer_email) {
     await sendWelcomeEmail(session.customer_email);
   }
@@ -130,20 +139,40 @@ async function handleSubscriptionChange(
   const firstItem = subscription?.items?.data?.[0];
   const periodStart = firstItem?.current_period_start;
   const periodEnd = firstItem?.current_period_end;
-  await supabase
+  const priceId = firstItem?.price?.id ?? null;
+
+  const { data: subscriptionData, error } = await supabase
     .from("subscriptions")
-    .update({
-      status: subscription.status,
-      ...(periodStart && {
-        current_period_start: new Date(periodStart * 1000).toISOString(),
-      }),
-      ...(periodEnd && {
-        current_period_end: new Date(periodEnd * 1000).toISOString(),
-      }),
-      cancel_at_period_end: subscription.cancel_at_period_end,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("stripe_subscription_id", subscription.id);
+    .upsert(
+      {
+        status: subscription.status,
+        current_period_start: periodStart
+          ? new Date(periodStart * 1000).toISOString()
+          : undefined,
+        current_period_end: periodEnd
+          ? new Date(periodEnd * 1000).toISOString()
+          : undefined,
+        cancel_at_period_end: subscription.cancel_at_period_end,
+        updated_at: new Date().toISOString(),
+        stripe_subscription_id: subscription.id,
+      },
+      { onConflict: "stripe_subscription_id" }
+    )
+    .select("user_id")
+    .single();
+
+  if (error) {
+    console.error("Error upserting subscription:", error);
+    return;
+  }
+
+  if (subscriptionData) {
+    const role = priceId ? "pro" : "free";
+    await supabase
+      .from("users")
+      .update({ role })
+      .eq("id", subscriptionData.user_id);
+  }
 }
 
 async function handlePaymentSucceeded(

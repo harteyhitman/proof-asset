@@ -40,3 +40,20 @@ CREATE INDEX idx_users_clerk_id ON users(clerk_id);
 CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX idx_subscriptions_status ON subscriptions(status);
 CREATE INDEX idx_usage_logs_user_id ON usage_logs(user_id);
+
+-- RLS Policies
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE usage_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can only see their own data" ON users
+  FOR SELECT USING (id = auth.uid());
+
+CREATE POLICY "Users can only update their own data" ON users
+  FOR UPDATE USING (id = auth.uid());
+
+CREATE POLICY "Users can only see their own subscriptions" ON subscriptions
+  FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "Users can only see their own usage logs" ON usage_logs
+  FOR SELECT USING (user_id = auth.uid());
